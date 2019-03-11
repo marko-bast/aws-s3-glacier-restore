@@ -155,7 +155,6 @@ def restore_main(
         days_to_keep,
         status_check):
 
-    # 34 sec / 40 threads from Mac (home network) results in 1047 files restored
     pool = ThreadPool(number_of_threads)
 
     s3_urls_and_sizes = []
@@ -273,6 +272,7 @@ if __name__ == '__main__':
              'files. Once you don\'t need them you can delete them from '
              'destination bucket.'
     )
+    # 40 threads from Mac (home network) results in 2K files restored per minute
     parser.add_argument(
         '-t',
         '--threads',
@@ -285,6 +285,10 @@ if __name__ == '__main__':
         help='Just print status of files and how many of them are in glacier '
              'and how many of them are restored already',
         action='store_true')
+    parser.add_argument(
+        "--profile",
+        help="Use a specific AWS profile from your credential file."
+    )
 
     args = vars(parser.parse_args())
     restored_count = AtomicInteger()
@@ -300,6 +304,9 @@ if __name__ == '__main__':
                         "destination_bucket")
 
     destination_bucket = args['destination_bucket']
+
+    if args['profile'] is not None:
+        boto3.setup_default_session(profile_name=args['profile'])
 
     restore_main(
         args['prefix'],

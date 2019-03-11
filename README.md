@@ -31,7 +31,7 @@ First get some help:
 $ aws-s3-glacier-restore -h
 usage: aws-s3-glacier-restore [-h] [-p PREFIX] [-i INPUT_FILE]
                               [-d DAYS_TO_KEEP] [-D DESTINATION_BUCKET]
-                              [-t THREADS] [-s]
+                              [-t THREADS] [-s] [--profile PROFILE]
 
 Utility script to restore files on AWS S3 that have GLACIER storage class
 
@@ -53,6 +53,7 @@ optional arguments:
                         Number of threads to use. Default=40
   -s, --status_print    Just print status of files and how many of them are in
                         glacier and how many of them are restored already
+  --profile PROFILE     Use a specific AWS profile from your credential file.
 </pre>
 
 Then full run might look like this:
