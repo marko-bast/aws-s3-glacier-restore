@@ -153,6 +153,7 @@ def check_status(to_check):
         else:
             s_print(
                 "Object {} is in Glacier and not being restored".format(path))
+            return to_check['file']
 
 
 def restore_main(
@@ -160,7 +161,8 @@ def restore_main(
         input_file,
         number_of_threads,
         days_to_keep,
-        status_check):
+        status_check,
+        missing):
 
     pool = ThreadPool(number_of_threads)
 
@@ -180,22 +182,27 @@ def restore_main(
         url_parsed = urllib.parse.urlparse(url_to_restore)
         if url_parsed.scheme != "s3":
             raise Exception("Prefix scheme must be s3!")
-        to_restore.append(dict(key=url_parsed.path, bucket=url_parsed.netloc))
-        total_size = total_size + int(size)
+        to_restore.append(dict(key=url_parsed.path, bucket=url_parsed.netloc, size=size))
 
     s_print("Done\n")
 
-    if status_check:
-        pool.map(
+    if status_check or missing:
+        not_restored = list(pool.map(
             check_status,
-            map(lambda x: {**dict(file=x)}, to_restore))
+            map(lambda x: {**dict(file=x)}, to_restore)))
         s_print("Restored count: {}/{}".format(
             restored_count.value(), len(to_restore)))
         if not_on_glacier_count.value() > 0:
             s_print("Also found: {} files with storage class that is not "
                     "Glacier. For them restore isn't needed"
                     .format(not_on_glacier_count.value()))
-        return
+        if missing:
+            to_restore = list(filter(lambda x: x != None, not_restored))
+        else:
+            return
+
+    for ele in to_restore:
+        total_size = total_size + int(ele['size'])
 
     total_size_in_gb = total_size / 1024 ** 3
     s_print("About to restore {:0.2f}GB in {} files"
@@ -293,6 +300,12 @@ if __name__ == '__main__':
              'and how many of them are restored already',
         action='store_true')
     parser.add_argument(
+        '-m',
+        '--missing',
+        help='Only restore objects in the prefix that are not currently '
+             'restored',
+        action='store_true')
+    parser.add_argument(
         "--profile",
         help="Use a specific AWS profile from your credential file."
     )
@@ -320,4 +333,5 @@ if __name__ == '__main__':
         args['input_file'],
         args['threads'],
         args['days_to_keep'],
-        args['status_print'])
+        args['status_print'],
+        args['missing'])
