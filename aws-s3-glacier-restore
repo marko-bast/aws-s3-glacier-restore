@@ -85,7 +85,10 @@ def get_matching_s3_keys_and_sizes(s3_url):
             break
 
 
-def restore(to_restore):
+def restore(to_restore, max_tries=10):
+    if max_tries < 1:
+        s_print("Maximum number of attempts at restoring the object exceeded")
+        return
     global destination_bucket
     key = to_restore['file']['key'].lstrip('/')
     bucket = to_restore['file']['bucket']
@@ -118,11 +121,11 @@ def restore(to_restore):
                 'GlacierExpeditedRetrievalNotAvailable':
             s_print("Expedited retrieval not available. Sleeping for 1 minute")
             time.sleep(60)
-            restore(to_restore)
+            restore(to_restore, max_tries - 1)
         elif e.response['Error']['Code'] == 'OperationAborted':
             s_print("Conflicting operation in progress. Retrying in 1 minute")
             time.sleep(60)
-            restore(to_restore)
+            restore(to_restore, max_tries - 1)
         else:
             raise e
 
