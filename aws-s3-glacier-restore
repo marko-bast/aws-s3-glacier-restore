@@ -119,6 +119,10 @@ def restore(to_restore):
             s_print("Expedited retrieval not available. Sleeping for 1 minute")
             time.sleep(60)
             restore(to_restore)
+        elif e.response['Error']['Code'] == 'OperationAborted':
+            s_print("Conflicting operation in progress. Retrying in 1 minute")
+            time.sleep(60)
+            restore(to_restore)
         else:
             raise e
 
