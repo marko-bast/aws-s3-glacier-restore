@@ -139,8 +139,8 @@ def check_status(to_check):
     response = boto3.client('s3').head_object(Bucket=bucket, Key=key)
     path = "s3://" + bucket + "/" + key
     if 'StorageClass' not in response \
-            or response['StorageClass'] != "GLACIER":
-        s_print("Object {} storageClass is not Glacier".format(path))
+            or response['StorageClass'] not in ["GLACIER", "DEEP_ARCHIVE"]:
+        s_print("Object {} storageClass is not Glacier or Glacier Deep Archvie: {}".format(path, response['StorageClass']))
         not_on_glacier_count.inc()
     else:
         if 'Restore' in response:
