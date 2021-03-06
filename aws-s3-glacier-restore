@@ -126,6 +126,8 @@ def restore(to_restore, max_tries=10):
             s_print("Conflicting operation in progress. Retrying in 1 minute")
             time.sleep(60)
             restore(to_restore, max_tries - 1)
+        elif e.response['Error']['Code'] == 'NoSuchKey':
+            s_print("Unable to find S3 object key: {}".format(key))
         else:
             raise e
 
@@ -179,7 +181,7 @@ def restore_main(
     to_restore = []
 
     for url_to_restore, size in s3_urls_and_sizes:
-        url_parsed = urllib.parse.urlparse(url_to_restore)
+        url_parsed = urllib.parse.urlparse(url_to_restore, allow_fragments=False)
         if url_parsed.scheme != "s3":
             raise Exception("Prefix scheme must be s3!")
         to_restore.append(dict(key=url_parsed.path, bucket=url_parsed.netloc, size=size))
