@@ -140,7 +140,8 @@ def check_status(to_check):
     path = "s3://" + bucket + "/" + key
     if 'StorageClass' not in response \
             or response['StorageClass'] not in ["GLACIER", "DEEP_ARCHIVE"]:
-        s_print("Object {} storageClass is not Glacier or Glacier Deep Archvie: {}".format(path, response['StorageClass']))
+        s_print("Object {} storageClass is not Glacier or Glacier Deep Archvie:"
+                " {}".format(path, response['StorageClass']))
         not_on_glacier_count.inc()
     else:
         if 'Restore' in response:
@@ -181,10 +182,12 @@ def restore_main(
     to_restore = []
 
     for url_to_restore, size in s3_urls_and_sizes:
-        url_parsed = urllib.parse.urlparse(url_to_restore, allow_fragments=False)
+        url_parsed = urllib.parse.urlparse(
+            url_to_restore, allow_fragments=False)
         if url_parsed.scheme != "s3":
             raise Exception("Prefix scheme must be s3!")
-        to_restore.append(dict(key=url_parsed.path, bucket=url_parsed.netloc, size=size))
+        to_restore.append(
+            dict(key=url_parsed.path, bucket=url_parsed.netloc, size=size))
 
     s_print("Done\n")
 
