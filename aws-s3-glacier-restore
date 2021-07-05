@@ -141,7 +141,7 @@ def check_status(to_check):
     if 'StorageClass' not in response \
             or response['StorageClass'] not in ["GLACIER", "DEEP_ARCHIVE"]:
         s_print("Object {} storageClass is not Glacier or Glacier Deep Archvie:"
-                " {}".format(path, response['StorageClass']))
+                " {}".format(path, response.get('StorageClass', 'No StorageClass returned')))
         not_on_glacier_count.inc()
     else:
         if 'Restore' in response:
