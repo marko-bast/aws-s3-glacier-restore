@@ -141,7 +141,7 @@ def check_status(to_check):
     if 'StorageClass' not in response \
             or response['StorageClass'] not in ["GLACIER", "DEEP_ARCHIVE"]:
         s_print("Object {} storageClass is not Glacier or Glacier Deep Archvie:"
-                " {}".format(path, response.get('StorageClass', 'No StorageClass returned')))
+                " {}".format(path, response['StorageClass']))
         not_on_glacier_count.inc()
     else:
         if 'Restore' in response:
@@ -165,7 +165,8 @@ def restore_main(
         number_of_threads,
         days_to_keep,
         status_check,
-        missing):
+        missing,
+        tier_nr):
 
     pool = ThreadPool(number_of_threads)
 
@@ -213,22 +214,23 @@ def restore_main(
     s_print("About to restore {:0.2f}GB in {} files"
             .format(total_size_in_gb, len(to_restore)))
 
-    prompt_template = """
-Restore will cost us:
-1) Expedited tier: ${expedited:0.2f}
-2) Standard tier:  ${standard:0.2f}
-3) Bulk tier:      ${bulk:0.2f}
-Keeping files on S3 will cost: ${one_day_cost:0.2f} per day
+    if tier_nr not in ['1', '2', '3']:
+        prompt_template = """
+    Restore will cost us:
+    1) Expedited tier: ${expedited:0.2f}
+    2) Standard tier:  ${standard:0.2f}
+    3) Bulk tier:      ${bulk:0.2f}
+    Keeping files on S3 will cost: ${one_day_cost:0.2f} per day
 
-Press number in front of an option you wish or any other key to exit: """
-    prompt = prompt_template.format(
-        expedited=total_size_in_gb * 0.03 + len(to_restore) * 10 / 1000,
-        standard=total_size_in_gb * 0.01 + len(to_restore) * 0.05 / 1000,
-        bulk=total_size_in_gb * 0.0025 + len(to_restore) * 0.025 / 1000,
-        days=days_to_keep,
-        one_day_cost=total_size_in_gb * 0.022 / 30
-    )
-    tier_nr = input(prompt)
+    Press number in front of an option you wish or any other key to exit: """
+        prompt = prompt_template.format(
+            expedited=total_size_in_gb * 0.03 + len(to_restore) * 10 / 1000,
+            standard=total_size_in_gb * 0.01 + len(to_restore) * 0.05 / 1000,
+            bulk=total_size_in_gb * 0.0025 + len(to_restore) * 0.025 / 1000,
+            days=days_to_keep,
+            one_day_cost=total_size_in_gb * 0.022 / 30
+        )
+        tier_nr = input(prompt)
     if tier_nr == "1":
         tier = "Expedited"
     elif tier_nr == "2":
@@ -298,6 +300,12 @@ if __name__ == '__main__':
         help='Number of threads to use. Default=40',
         type=int,
         default=40)
+    # Added an option to add a tier number to the command line. Skips prompt
+    parser.add_argument(
+        '-n',
+        '--tier_nr',
+        help='The tier to use for restore. 1=Expedited, 2=Standard, 3=Bulk.',
+        default="0")
     parser.add_argument(
         '-s',
         '--status_print',
@@ -339,4 +347,6 @@ if __name__ == '__main__':
         args['threads'],
         args['days_to_keep'],
         args['status_print'],
-        args['missing'])
+        args['missing'],
+        args['tier_nr'],
+        )
