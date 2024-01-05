@@ -177,7 +177,7 @@ def restore_main(
     else:
         with open(input_file) as file:
             for line in file.readlines():
-                s3_urls_and_sizes.append((line.rstrip("\n"), 0))
+                s3_urls_and_sizes += (get_matching_s3_keys_and_sizes(line.rstrip("\n")))
 
     total_size = 0
     to_restore = []
