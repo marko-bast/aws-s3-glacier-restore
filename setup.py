@@ -4,7 +4,7 @@ import setuptools
 
 setuptools.setup(
     name='aws-s3-glacier-restore',
-    version='0.0.5',
+    version='0.0.6',
     scripts=['aws-s3-glacier-restore'],
     author="Marko Baštovanović",
     author_email="marko.bast@gmail.com",

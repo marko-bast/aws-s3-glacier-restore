@@ -19,6 +19,7 @@ _spec.loader.exec_module(mod)
 # Aliases for convenience
 AtomicInteger = mod.AtomicInteger
 get_matching_s3_keys_and_sizes = mod.get_matching_s3_keys_and_sizes
+_list_prefix = mod._list_prefix
 restore = mod.restore
 check_status = mod.check_status
 
@@ -110,6 +111,17 @@ class TestGetMatchingS3KeysAndSizes:
         mock_client.list_objects_v2.return_value = {}
         with pytest.raises(Exception, match="No S3 files for prefix"):
             list(get_matching_s3_keys_and_sizes("s3://mybucket/empty/"))
+
+    @patch("glacier_restore.boto3")
+    def test_list_prefix_returns_list(self, mock_boto3):
+        """_list_prefix materialises the generator so a pool can map over it."""
+        mock_client = MagicMock()
+        mock_boto3.client.return_value = mock_client
+        mock_client.list_objects_v2.return_value = {
+            "Contents": [{"Key": "data/file1.txt", "Size": 100}]
+        }
+        result = _list_prefix("s3://mybucket/data/")
+        assert result == [("s3://mybucket/data/file1.txt", 100)]
 
 
 # ---------------------------------------------------------------------------
@@ -259,6 +271,7 @@ class TestCheckStatus:
     def test_glacier_restore_in_progress(self, mock_boto3):
         mod.restored_count = AtomicInteger()
         mod.not_on_glacier_count = AtomicInteger()
+        mod.in_progress_count = AtomicInteger()
         mock_client = MagicMock()
         mock_boto3.client.return_value = mock_client
         mock_client.head_object.return_value = {
@@ -268,6 +281,7 @@ class TestCheckStatus:
         result = check_status(self._make_to_check())
         assert result is None
         assert mod.restored_count.value() == 0
+        assert mod.in_progress_count.value() == 1
 
     @patch("glacier_restore.boto3")
     def test_glacier_restore_completed(self, mock_boto3):
@@ -295,16 +309,89 @@ class TestCheckStatus:
         assert result is not None
 
     @patch("glacier_restore.boto3")
-    def test_intelligent_tiering_recognized(self, mock_boto3):
+    def test_intelligent_tiering_accessible(self, mock_boto3):
+        """IT object with no ArchiveStatus is instantly readable, not Glacier."""
         mod.restored_count = AtomicInteger()
         mod.not_on_glacier_count = AtomicInteger()
         mock_client = MagicMock()
         mock_boto3.client.return_value = mock_client
         mock_client.head_object.return_value = {"StorageClass": "INTELLIGENT_TIERING"}
         result = check_status(self._make_to_check())
-        # Not being restored, should return the file dict
+        # Accessible -> no restore needed, no file returned
+        assert result is None
+        assert mod.not_on_glacier_count.value() == 1
+
+    @patch("glacier_restore.boto3")
+    def test_intelligent_tiering_archive_access(self, mock_boto3):
+        """IT in Archive Access tier genuinely needs a restore."""
+        mod.restored_count = AtomicInteger()
+        mod.not_on_glacier_count = AtomicInteger()
+        mock_client = MagicMock()
+        mock_boto3.client.return_value = mock_client
+        mock_client.head_object.return_value = {
+            "StorageClass": "INTELLIGENT_TIERING",
+            "ArchiveStatus": "ARCHIVE_ACCESS",
+        }
+        result = check_status(self._make_to_check())
         assert result is not None
         assert mod.not_on_glacier_count.value() == 0
+
+    @patch("glacier_restore.boto3")
+    def test_intelligent_tiering_deep_archive_access(self, mock_boto3):
+        mod.restored_count = AtomicInteger()
+        mod.not_on_glacier_count = AtomicInteger()
+        mock_client = MagicMock()
+        mock_boto3.client.return_value = mock_client
+        mock_client.head_object.return_value = {
+            "StorageClass": "INTELLIGENT_TIERING",
+            "ArchiveStatus": "DEEP_ARCHIVE_ACCESS",
+        }
+        result = check_status(self._make_to_check())
+        assert result is not None
+        assert mod.not_on_glacier_count.value() == 0
+
+    @patch("glacier_restore.boto3")
+    def test_intelligent_tiering_restore_in_progress(self, mock_boto3):
+        mod.restored_count = AtomicInteger()
+        mod.not_on_glacier_count = AtomicInteger()
+        mod.in_progress_count = AtomicInteger()
+        mock_client = MagicMock()
+        mock_boto3.client.return_value = mock_client
+        mock_client.head_object.return_value = {
+            "StorageClass": "INTELLIGENT_TIERING",
+            "ArchiveStatus": "ARCHIVE_ACCESS",
+            "Restore": 'ongoing-request="true"',
+        }
+        result = check_status(self._make_to_check())
+        assert result is None
+        assert mod.in_progress_count.value() == 1
+        assert mod.restored_count.value() == 0
+
+    @patch("glacier_restore.boto3")
+    def test_intelligent_tiering_restore_completed(self, mock_boto3):
+        mod.restored_count = AtomicInteger()
+        mod.not_on_glacier_count = AtomicInteger()
+        mock_client = MagicMock()
+        mock_boto3.client.return_value = mock_client
+        mock_client.head_object.return_value = {
+            "StorageClass": "INTELLIGENT_TIERING",
+            "ArchiveStatus": "ARCHIVE_ACCESS",
+            "Restore": 'ongoing-request="false", expiry-date="Mon, 01 Jan 2030 00:00:00 GMT"',
+        }
+        result = check_status(self._make_to_check())
+        assert result is None
+        assert mod.restored_count.value() == 1
+
+    @patch("glacier_restore.boto3")
+    def test_glacier_ir_no_restore_needed(self, mock_boto3):
+        """Glacier Instant Retrieval is readable directly, no restore job."""
+        mod.not_on_glacier_count = AtomicInteger()
+        mock_client = MagicMock()
+        mock_boto3.client.return_value = mock_client
+        mock_client.head_object.return_value = {"StorageClass": "GLACIER_IR"}
+        result = check_status(self._make_to_check())
+        assert result is None
+        assert mod.not_on_glacier_count.value() == 1
 
     @patch("glacier_restore.boto3")
     def test_reduced_redundancy_not_glacier(self, mock_boto3):

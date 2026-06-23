@@ -50,7 +50,9 @@ optional arguments:
                         you'll need restored files. Once you don't need them
                         you can delete them from destination bucket.
   -t THREADS, --threads THREADS
-                        Number of threads to use. Default=1
+                        Number of concurrent S3 connections, not CPU cores.
+                        Raising this speeds up status/listing on large
+                        inputs; too high risks S3 throttling. Default=1
   -n TIER_NR, --tier_nr TIER_NR
                         Optional parameter to set the tier level for restore (skips interactive prompt). 1=Expedited, 2=Standard, 3=Bulk.
   -s, --status_print    Just print status of files and how many of them are in
@@ -105,9 +107,14 @@ Object s3://test-restore-bucket/archives/cars/GlacierImageArchive_2017_10-000000
 Object s3://test-restore-bucket/archives/cars/GlacierImageArchive_2017_10-00000001-r-00090 is restored until Fri, 19 Oct 2018 00:00:00 GMT
 Object s3://test-restore-bucket/archives/cars/GlacierImageArchive_2017_10-00000001-r-00098 is restored until Fri, 19 Oct 2018 00:00:00 GMT
 Object s3://test-restore-bucket/archives/cars/GlacierImageArchive_2017_10-00000001-r-00096 is restored until Mon, 24 Sep 2018 00:00:00 GMT
-Object s3://test-restore-bucket/archives/cars/GlacierImageArchive_2017_10-00000001-r-00099 is in Glacier and not being restored
+Object s3://test-restore-bucket/archives/cars/GlacierImageArchive_2017_10-00000001-r-00099 storage class INTELLIGENT_TIERING does not require restore
 Object s3://test-restore-bucket/archives/cars/GlacierImageArchive_2017_10-00000001-r-00097 is in Glacier and not being restored
-Restored count: 3/10
+Status summary:
+  1 already accessible, no restore needed
+  3 restored and ready
+  1 restoring now
+  5 not started
+Accessible now: 4/10
 ```
 ### License
 

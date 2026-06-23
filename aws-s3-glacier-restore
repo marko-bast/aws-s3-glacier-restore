@@ -14,6 +14,7 @@ destination_bucket = None
 s_print_lock = threading.Lock()
 restored_count = None
 not_on_glacier_count = None
+in_progress_count = None
 
 
 def s_print(*a, **b):
@@ -87,6 +88,15 @@ def get_matching_s3_keys_and_sizes(s3_url):
             break
 
 
+def _list_prefix(s3_url):
+    """Return all (url, size) tuples for a single prefix as a list.
+
+    Wraps the generator so multiple prefixes from an input file can be listed
+    concurrently through a thread pool.
+    """
+    return list(get_matching_s3_keys_and_sizes(s3_url))
+
+
 def restore(to_restore, max_tries=10):
     global destination_bucket
     key = to_restore['file']['key'].lstrip('/')
@@ -141,15 +151,25 @@ def restore(to_restore, max_tries=10):
 
 
 def check_status(to_check):
-    global restored_count, not_on_glacier_count
+    global restored_count, not_on_glacier_count, in_progress_count
     key = to_check['file']['key'].lstrip("/")
     bucket = to_check['file']['bucket']
     response = boto3.client('s3').head_object(Bucket=bucket, Key=key)
     path = "s3://" + bucket + "/" + key
     storage_class = response.get('StorageClass', 'STANDARD')
-    if storage_class not in ["GLACIER", "DEEP_ARCHIVE", "INTELLIGENT_TIERING"]:
-        s_print("Object {} storageClass is not Glacier or Glacier Deep Archive:"
-                " {}".format(path, storage_class))
+    # Intelligent-Tiering objects only need a restore once they have moved to
+    # the Archive Access or Deep Archive Access tier, which HeadObject reports
+    # via ArchiveStatus. Without ArchiveStatus an IT object is instantly
+    # readable, so treating every IT object as Glacier (the old behaviour)
+    # wrongly reported accessible files as "in Glacier and not being restored".
+    archive_status = response.get('ArchiveStatus')
+    needs_restore = (
+        storage_class in ("GLACIER", "DEEP_ARCHIVE")
+        or (storage_class == "INTELLIGENT_TIERING"
+            and archive_status in ("ARCHIVE_ACCESS", "DEEP_ARCHIVE_ACCESS")))
+    if not needs_restore:
+        s_print("Object {} storage class {} does not require restore".format(
+            path, storage_class))
         not_on_glacier_count.inc()
     else:
         if 'Restore' in response:
@@ -161,6 +181,7 @@ def check_status(to_check):
                 restored_count.inc()
             else:
                 s_print("Object {} is being restored".format(path))
+                in_progress_count.inc()
         else:
             s_print(
                 "Object {} is in Glacier and not being restored".format(path))
@@ -175,12 +196,14 @@ def restore_main(
         status_check,
         missing,
         tier_nr):
-    global restored_count, not_on_glacier_count
+    global restored_count, not_on_glacier_count, in_progress_count
 
     if restored_count is None:
         restored_count = AtomicInteger()
     if not_on_glacier_count is None:
         not_on_glacier_count = AtomicInteger()
+    if in_progress_count is None:
+        in_progress_count = AtomicInteger()
 
     pool = ThreadPool(number_of_threads)
 
@@ -190,8 +213,14 @@ def restore_main(
         s3_urls_and_sizes = get_matching_s3_keys_and_sizes(s3_url)
     else:
         with open(input_file) as file:
-            for line in file.readlines():
-                s3_urls_and_sizes += (get_matching_s3_keys_and_sizes(line.rstrip("\n")))
+            prefixes = [line.rstrip("\n") for line in file.readlines()
+                        if line.strip()]
+        # List prefixes concurrently so a large input file starts producing
+        # output sooner. Speedup scales with --threads; a single prefix (-p)
+        # can't be parallelised because its pages are fetched serially.
+        s_print("Listing {} prefixes... ".format(len(prefixes)), end="")
+        for listing in pool.map(_list_prefix, prefixes):
+            s3_urls_and_sizes += listing
 
     total_size = 0
     to_restore = []
@@ -210,12 +239,15 @@ def restore_main(
         not_restored = list(pool.map(
             check_status,
             map(lambda x: {**dict(file=x)}, to_restore)))
-        s_print("Restored count: {}/{}".format(
-            restored_count.value(), len(to_restore)))
-        if not_on_glacier_count.value() > 0:
-            s_print("Also found: {} files with storage class that is not "
-                    "Glacier. For them restore isn't needed"
-                    .format(not_on_glacier_count.value()))
+        not_started = len([x for x in not_restored if x is not None])
+        accessible = restored_count.value() + not_on_glacier_count.value()
+        s_print("Status summary:")
+        s_print("  {} already accessible, no restore needed".format(
+            not_on_glacier_count.value()))
+        s_print("  {} restored and ready".format(restored_count.value()))
+        s_print("  {} restoring now".format(in_progress_count.value()))
+        s_print("  {} not started".format(not_started))
+        s_print("Accessible now: {}/{}".format(accessible, len(to_restore)))
         if missing:
             to_restore = list(filter(lambda x: x is not None, not_restored))
         else:
@@ -308,7 +340,9 @@ if __name__ == '__main__':
     parser.add_argument(
         '-t',
         '--threads',
-        help='Number of threads to use. Default=1',
+        help='Number of concurrent S3 connections, not CPU cores. Raising '
+             'this speeds up status/listing on large inputs; too high risks '
+             'S3 throttling. Default=1',
         type=int,
         default=1)
     # Added an option to add a tier number to the command line. Skips prompt
@@ -337,6 +371,7 @@ if __name__ == '__main__':
     args = vars(parser.parse_args())
     restored_count = AtomicInteger()  # noqa: F841 - used as module global
     not_on_glacier_count = AtomicInteger()  # noqa: F841 - used as module global
+    in_progress_count = AtomicInteger()  # noqa: F841 - used as module global
 
     if args['input_file'] is None and args['prefix'] is None:
         raise Exception("Must either specify input_file or prefix")
